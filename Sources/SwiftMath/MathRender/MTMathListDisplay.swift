@@ -829,3 +829,68 @@ class MTAccentDisplay : MTDisplay {
     }
     
 }
+
+/// Rendering of a list with a box around it.
+class MTBoxedDisplay: MTDisplay {
+    
+    /// The display representing the inner list.
+    var inner: MTMathListDisplay
+    
+    // 内边距，可以根据需要调整
+    let padding: CGFloat = 3.0
+    
+    init(withInner inner: MTMathListDisplay, position: CGPoint, range: NSRange) {
+        self.inner = inner
+        super.init()
+        self.position = position
+        self.range = range
+        
+        // --- 计算尺寸 ---
+        // 宽度是内部宽度加上左右两边的内边距
+        self.width = inner.width + 2 * padding
+        // 上升和下降高度是内部的上升/下降高度加上上下的内边距
+        self.ascent = inner.ascent + padding
+        self.descent = inner.descent + padding
+        
+        // 更新内部 display 的相对位置，使其在盒子里居中
+        self.updateInnerPosition()
+    }
+    
+    override var textColor: MTColor? {
+        didSet {
+            inner.textColor = textColor
+        }
+    }
+    
+    override var position: CGPoint {
+        didSet {
+            self.updateInnerPosition()
+        }
+    }
+
+    private func updateInnerPosition() {
+        // 内部内容的 x 坐标是内边距，y 坐标保持不变（相对父级）
+        self.inner.position = CGPoint(x: self.position.x + padding, y: self.position.y)
+    }
+
+    override func draw(_ context: CGContext) {
+        // 先调用父类的 draw，以处理可能的背景色
+        super.draw(context)
+        
+        // 绘制内部内容
+        self.inner.draw(context)
+        
+        // 绘制边框
+        context.saveGState()
+        
+        // 使用当前的文字颜色来画边框
+        (self.textColor ?? MTColor.black).setStroke()
+        context.setLineWidth(0.5) // 设置一个合适的线宽
+        
+        // 计算边框的矩形区域
+        let borderRect = CGRect(x: self.position.x, y: self.position.y - self.descent, width: self.width, height: self.ascent + self.descent)
+        context.stroke(borderRect)
+        
+        context.restoreGState()
+    }
+}

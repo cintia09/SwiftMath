@@ -173,9 +173,14 @@ func getDefaultStyle(_ ch:Character) -> UTF32Char {
         // . is treated as a number in our code, but it doesn't change fonts.
         return ch.utf32Char
     } else {
-        NSException(name: NSExceptionName("IllegalCharacter"), reason: "Unknown character \(ch) for default style.").raise()
+        // CJK MOD: START - 不要崩溃，直接返回原字符
+        // 对于无法识别的字符（可能是标点、特殊符号，甚至是CJK字符的漏网之鱼），
+        // 最安全的做法是直接返回它自己，让排版引擎用默认字体尝试渲染。
+        return ch.utf32Char
+        // NSException(name: NSExceptionName("IllegalCharacter"), reason: "Unknown character \(ch) for default style.").raise()
+        // CJK MOD: END
     }
-    return ch.utf32Char
+    // return ch.utf32Char // 这行现在是多余的
 }
 
 // mathcal/mathscr (caligraphic or script)
@@ -311,6 +316,11 @@ func getBlackboard(_ ch:Character) -> UTF32Char {
 }
 
 func styleCharacter(_ ch:Character, fontStyle:MTFontStyle) -> UTF32Char {
+    // CJK MOD: 如果是 CJK 字符，直接返回，避免不必要的处理
+    if ch.isCJK {
+        return ch.utf32Char
+    }
+    
     switch fontStyle {
         case .defaultStyle:
             return getDefaultStyle(ch);
@@ -337,13 +347,18 @@ func styleCharacter(_ ch:Character, fontStyle:MTFontStyle) -> UTF32Char {
 
 func changeFont(_ str:String, fontStyle:MTFontStyle) -> String {
     var retval = ""
-    let codes = Array(str)
-    for i in 0..<str.count {
-        let ch = codes[i]
-        var unicode = styleCharacter(ch, fontStyle: fontStyle);
-        unicode = NSSwapHostIntToLittle(unicode)
-        let charStr = String(UnicodeScalar(unicode)!)
-        retval.append(charStr)
+    // 不再使用复杂的 codes 数组和索引，直接遍历字符串中的字符
+    for ch in str {
+        // 注意：这里不再需要 NSSwapHostIntToLittle，因为 styleCharacter 返回的是 UTF32Char，
+        // 而 String(UnicodeScalar(unicode)!) 会正确处理。
+        // 如果原始代码确实需要字节序转换，那么需要更仔细地检查其上下文。
+        // 但对于直接创建 String，通常不需要。
+        let unicode = styleCharacter(ch, fontStyle: fontStyle)
+        if let scalar = UnicodeScalar(unicode) {
+            retval.append(String(scalar))
+        } else {
+            retval.append(ch) // 如果转换失败，则追加原字符
+        }
     }
     return retval
 }
@@ -422,38 +437,33 @@ class MTTypesetter {
         preprocessed.reserveCapacity(ml!.atoms.count)
         for atom in ml!.atoms {
             if atom.type == .variable || atom.type == .number {
-                // This is not a TeX type node. TeX does this during parsing the input.
-                // switch to using the italic math font
-                // We convert it to ordinary
-                let newFont = changeFont(atom.nucleus, fontStyle: atom.fontStyle) // mathItalicize(atom.nucleus)
+                // CJK MOD: START - 不再调用 changeFont
+                // 我们只改变类型，不改变原子核的内容。
+                // 真正的字符样式转换推迟到 createDisplayAtoms 中进行。
+                // let newFont = changeFont(atom.nucleus, fontStyle: atom.fontStyle)
                 atom.type = .ordinary
-                atom.nucleus = newFont
+                // atom.nucleus = newFont // <-- 删除或注释掉这一行
+                // CJK MOD: END
             } else if atom.type == .unaryOperator {
-                // Neither of these are TeX nodes. TeX treats these as Ordinary. So will we.
                 atom.type = .ordinary
             }
 
             if atom.type == .ordinary {
-                // This is Rule 14 to merge ordinary characters.
-                // combine ordinary atoms together
+                // 合并逻辑保持不变
                 if prevNode != nil && prevNode.type == .ordinary && prevNode.subScript == nil && prevNode.superScript == nil {
-                    prevNode.fuse(with: atom)
-                    // skip the current node, we are done here.
-                    continue
+                    // 改进的合并逻辑
+                    let currentIsCJK = atom.nucleus.first?.isCJK ?? false
+                    let prevIsCJK = prevNode.nucleus.first?.isCJK ?? false
+                    if currentIsCJK == prevIsCJK {
+                        prevNode.fuse(with: atom)
+                        continue
+                    }
                 }
             }
-
-            // CJK MOD: START - 合并连续的 CJK 字符
-            if let firstChar = atom.nucleus.first, firstChar.isCJK, atom.type == .ordinary,
-            prevNode != nil, let prevFirstChar = prevNode.nucleus.first, prevFirstChar.isCJK, prevNode.type == .ordinary,
-            prevNode.subScript == nil, prevNode.superScript == nil {
-
-                prevNode.fuse(with: atom)
-                continue
-            }
-            // CJK MOD: END
-
-            // TODO: add italic correction here or in second pass?
+            
+            // CJK 合并逻辑，这个可以保留，但上面的改进版更好
+            // if let firstChar = atom.nucleus.first, firstChar.isCJK, ... { ... }
+            
             prevNode = atom
             preprocessed.append(atom)
         }
@@ -701,7 +711,31 @@ class MTTypesetter {
                     if atom.subScript != nil || atom.superScript != nil {
                         self.makeScripts(atom, display:display, index:UInt(atom.indexRange.location), delta:0)
                     }
+                case .boxed: // <-- 新增的 case
+                    // 先提交当前正在构建的行
+                    if currentLine.length > 0 {
+                        self.addDisplayLine()
+                    }
+                    
+                    // .boxed 在规则16中被视为普通字符（Ordinary）来计算间距
+                    self.addInterElementSpace(prevNode, currentType: .ordinary)
+                    atom.type = .ordinary; // 更新类型以便后续间距计算
 
+                    let boxedAtom = atom as! MTBoxed
+                    
+                    // 递归排版盒子内部的内容
+                    let innerDisplay = MTTypesetter.createLineForMathList(boxedAtom.innerList, font: font, style: style, cramped: cramped)
+                    
+                    // 创建我们新的 MTBoxedDisplay
+                    let display = MTBoxedDisplay(withInner: innerDisplay!, position: currentPosition, range: boxedAtom.indexRange)
+                    
+                    displayAtoms.append(display)
+                    currentPosition.x += display.width
+                    
+                    // boxed 后面也可以跟上下标
+                    if atom.subScript != nil || atom.superScript != nil {
+                        self.makeScripts(atom, display: display, index: UInt(atom.indexRange.location), delta: 0)
+                    }
                 case .table:
                     // stash the existing layout
                     if currentLine.length > 0 {
@@ -716,105 +750,88 @@ class MTTypesetter {
                     displayAtoms.append(display!)
                     currentPosition.x += display!.width
                     // A table doesn't have subscripts or superscripts
-
-                case .ordinary, .binaryOperator, .relation, .open, .close, .placeholder, .punctuation:
-                // CJK MOD: START - 检查原子是否包含 CJK 字符
-                    if let firstChar = atom.nucleus.first, firstChar.isCJK {
-                        // CJK 字符，进入特殊处理流程
-
-                        // 1. 如果有正在累积的西文行，先提交
-                        if currentLine.length > 0 {
-                            self.addDisplayLine()
+            case .ordinary, .binaryOperator, .relation, .open, .close, .placeholder, .punctuation:
+                // ... （处理元素间距的代码保持不变）
+                if prevNode != nil {
+                    let interElementSpace = self.getInterElementSpace(prevNode!.type, right:atom.type)
+                    if currentLine.length > 0 {
+                        if interElementSpace > 0 {
+                            currentLine.addAttribute(kCTKernAttributeName as NSAttributedString.Key,
+                                                     value:NSNumber(floatLiteral: interElementSpace),
+                                                     range:currentLine.mutableString.rangeOfComposedCharacterSequence(at: currentLine.length-1))
                         }
-
-                        // 2. 计算元素间距
-                        self.addInterElementSpace(prevNode, currentType: atom.type)
-
-                        // 3. 获取 macOS 上的中文字体
-                        let cjkFontName = "PingFangSC-Regular" // macOS 标准简体中文字体
-                        guard let cjkFont = MTFont(fontWithName: cjkFontName, size: self.styleFont.fontSize) else {
-                            // 如果字体加载失败（几乎不可能），则跳过特殊处理
-                            break
-                        }
-
-                        // 4. 创建富文本和显示对象
-                        let cjkAttributes: [NSAttributedString.Key: Any] = [
-                            kCTFontAttributeName as NSAttributedString.Key: cjkFont.ctFont as Any
-                        ]
-                        let cjkAttributedString = NSAttributedString(string: atom.nucleus, attributes: cjkAttributes)
-
-                        let cjkDisplay = MTCTLineDisplay(withString: cjkAttributedString,
-                                                        position: self.currentPosition,
-                                                        range: atom.indexRange,
-                                                        font: cjkFont,
-                                                        atoms: [atom])
-
-                        self.displayAtoms.append(cjkDisplay)
-                        self.currentPosition.x += cjkDisplay.width
-
-                        // 5. 更新状态并跳过默认逻辑
-                        prevNode = atom
-                        lastType = atom.type
-                        continue
+                    } else {
+                        currentPosition.x += interElementSpace
                     }
-                    // CJK MOD: END - 如果不是 CJK 字符，则执行下面的原始逻辑
+                }
 
-                    // the rendering for all the rest is pretty similar
-                    // All we need is render the character and set the interelement space.
-                    if prevNode != nil {
-                        let interElementSpace = self.getInterElementSpace(prevNode!.type, right:atom.type)
-                        if currentLine.length > 0 {
-                            if interElementSpace > 0 {
-                                // add a kerning of that space to the previous character
-                                currentLine.addAttribute(kCTKernAttributeName as NSAttributedString.Key,
-                                                         value:NSNumber(floatLiteral: interElementSpace),
-                                                         range:currentLine.mutableString.rangeOfComposedCharacterSequence(at: currentLine.length-1))
-                            }
+                // CJK MOD: START - 智能字体分配
+                let attributedNucleus: NSAttributedString
+
+                if atom.type == .placeholder {
+                    // 占位符的特殊处理
+                    let attributes: [NSAttributedString.Key: Any] = [
+                        kCTForegroundColorAttributeName as NSAttributedString.Key: MTTypesetter.placeholderColor.cgColor,
+                        kCTFontAttributeName as NSAttributedString.Key: self.styleFont.ctFont
+                    ]
+                    attributedNucleus = NSAttributedString(string: atom.nucleus, attributes: attributes)
+                } else {
+                    // 遍历原子核中的每一个原始字符
+                    for char in atom.nucleus {
+                        var charToRender: String
+                        let fontForChar: CTFont // 我们直接处理 CTFont
+
+                        if char.isCJK {
+                            // 是 CJK 字符 -> 直接创建系统字体的 CTFont
+                            charToRender = String(char)
+                            let cjkFontName = "PingFangSC-Regular" as CFString
+                            // 直接使用 CoreText API 创建字体，不依赖任何 MTFont 初始化器
+                            fontForChar = CTFontCreateWithName(cjkFontName, self.styleFont.fontSize, nil)
                         } else {
-                            // increase the space
-                            currentPosition.x += interElementSpace
+                            // 是西文/符号 -> 使用 styleFont，并应用数学样式
+                            let styledUnicode = styleCharacter(char, fontStyle: atom.fontStyle)
+                            if let scalar = UnicodeScalar(styledUnicode) {
+                                charToRender = String(scalar)
+                            } else {
+                                charToRender = String(char)
+                            }
+                            // 使用当前排版上下文的数学字体
+                            fontForChar = self.styleFont.ctFont
                         }
+                        
+                        // 为这单个字符创建带正确字体的 NSAttributedString
+                        let attributes: [NSAttributedString.Key: Any] = [
+                            kCTFontAttributeName as NSAttributedString.Key: fontForChar
+                        ]
+                        let attributedChar = NSAttributedString(string: charToRender, attributes: attributes)
+                        currentLine.append(attributedChar)
                     }
-                    var current:NSAttributedString? = nil
-                    if atom.type == .placeholder {
-                        let color = MTTypesetter.placeholderColor
-                        current = NSAttributedString(string:atom.nucleus,
-                                                     attributes:[kCTForegroundColorAttributeName as NSAttributedString.Key : color.cgColor])
-                    } else {
-                        current = NSAttributedString(string:atom.nucleus)
-                    }
-                    currentLine.append(current!)
-                    // add the atom to the current range
-                    if currentLineIndexRange.location == NSNotFound {
-                        currentLineIndexRange = atom.indexRange
-                    } else {
-                        currentLineIndexRange.length += atom.indexRange.length
-                    }
-                    // add the fused atoms
-                    if !atom.fusedAtoms.isEmpty {
-                        currentAtoms.append(contentsOf: atom.fusedAtoms)  //.addObjectsFromArray:atom.fusedAtoms)
-                    } else {
-                        currentAtoms.append(atom)
-                    }
+                }
 
-                    // add super scripts || subscripts
-                    if atom.subScript != nil || atom.superScript != nil {
-                        // stash the existing line
-                        // We don't check currentLine.length here since we want to allow empty lines with super/sub scripts.
-                        let line = self.addDisplayLine()
-                        var delta = CGFloat(0)
-                        if !atom.nucleus.isEmpty {
-                            // Use the italic correction of the last character.
-                            let index = atom.nucleus.index(before: atom.nucleus.endIndex)
-                            let glyph = self.findGlyphForCharacterAtIndex(index, inString:atom.nucleus)
-                            delta = styleFont.mathTable!.getItalicCorrection(glyph)
-                        }
-                        if delta > 0 && atom.subScript == nil {
-                            // Add a kern of delta
-                            currentPosition.x += delta;
-                        }
-                        self.makeScripts(atom, display:line, index:UInt(NSMaxRange(atom.indexRange) - 1), delta:delta)
+                // ... （后续的索引、融合原子、处理上下标的代码保持不变）
+                if currentLineIndexRange.location == NSNotFound {
+                    currentLineIndexRange = atom.indexRange
+                } else {
+                    currentLineIndexRange.length += atom.indexRange.length
+                }
+                if !atom.fusedAtoms.isEmpty {
+                    currentAtoms.append(contentsOf: atom.fusedAtoms)
+                } else {
+                    currentAtoms.append(atom)
+                }
+                if atom.subScript != nil || atom.superScript != nil {
+                    let line = self.addDisplayLine()
+                    var delta = CGFloat(0)
+                    if !atom.nucleus.isEmpty {
+                        let index = atom.nucleus.index(before: atom.nucleus.endIndex)
+                        let glyph = self.findGlyphForCharacterAtIndex(index, inString:atom.nucleus)
+                        delta = styleFont.mathTable!.getItalicCorrection(glyph)
                     }
+                    if delta > 0 && atom.subScript == nil {
+                        currentPosition.x += delta;
+                    }
+                    self.makeScripts(atom, display:line, index:UInt(NSMaxRange(atom.indexRange) - 1), delta:delta)
+                }
             } // switch
             lastType = atom.type
             prevNode = atom
@@ -832,8 +849,8 @@ class MTTypesetter {
 
     @discardableResult
     func addDisplayLine() -> MTCTLineDisplay? {
-        // add the font
-        currentLine.addAttribute(kCTFontAttributeName as NSAttributedString.Key, value:styleFont.ctFont as Any, range:NSMakeRange(0, currentLine.length))
+        // CJK MOD: 必须注释或删除这一行！
+            // currentLine.addAttribute(kCTFontAttributeName as NSAttributedString.Key, value:styleFont.ctFont as Any, range:NSMakeRange(0, currentLine.length))
         /*assert(currentLineIndexRange.length == numCodePoints(currentLine.string),
          "The length of the current line: %@ does not match the length of the range (%d, %d)",
          currentLine, currentLineIndexRange.location, currentLineIndexRange.length);*/

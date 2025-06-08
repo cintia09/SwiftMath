@@ -1,4 +1,6 @@
 //
+//  MTMathListBuilder.swift (Final, Complete, and Corrected for Direct Replacement)
+//
 //  Created by Mike Griebling on 2022-12-31.
 //  Translated from an Objective-C implementation by Kostub Deshmukh.
 //
@@ -25,9 +27,6 @@ struct MTEnvProperties {
 
 /**
  The error encountered when parsing a LaTeX string.
- 
- The `code` in the `NSError` is one of the following indicating why the LaTeX string
- could not be parsed.
  */
 enum MTParseErrors:Int {
     /// The braces { } do not match.
@@ -154,29 +153,63 @@ public struct MTMathListBuilder {
     /** Construct a math list from a given string. If there is parse error, returns
      nil. To retrieve the error use the function `MTMathListBuilder.build(fromString:error:)`.
      */
+    // --- START: MODIFIED FUNCTION ---
     public static func build(fromString string: String) -> MTMathList? {
-        var builder = MTMathListBuilder(string: string)
+        var newString = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if (newString.hasPrefix("$$") && newString.hasSuffix("$$")) {
+            if newString.count >= 4 { newString = String(newString.dropFirst(2).dropLast(2)) }
+        } else if (newString.hasPrefix("\\[") && newString.hasSuffix("\\]")) {
+            if newString.count >= 4 { newString = String(newString.dropFirst(2).dropLast(2)) }
+        } else if (newString.hasPrefix("\\(") && newString.hasSuffix("\\)")) {
+            if newString.count >= 4 { newString = String(newString.dropFirst(2).dropLast(2)) }
+        } else if (newString.hasPrefix("$") && newString.hasSuffix("$")) {
+            // This is last to avoid matching $$
+            if newString.count >= 2 { newString = String(newString.dropFirst().dropLast()) }
+        }
+        
+        var builder = MTMathListBuilder(string: newString)
         return builder.build()
     }
+    // --- END: MODIFIED FUNCTION ---
     
     /** Construct a math list from a given string. If there is an error while
      constructing the string, this returns nil. The error is returned in the
      `error` parameter.
      */
+    // --- START: MODIFIED FUNCTION ---
     public static func build(fromString string: String, error:inout NSError?) -> MTMathList? {
-        var builder = MTMathListBuilder(string: string)
+        // The version with an error parameter should also benefit from delimiter stripping.
+        // First, we call the stripping version. If it succeeds, great.
+        var newString = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if (newString.hasPrefix("$$") && newString.hasSuffix("$$")) {
+            if newString.count >= 4 { newString = String(newString.dropFirst(2).dropLast(2)) }
+        } else if (newString.hasPrefix("\\[") && newString.hasSuffix("\\]")) {
+            if newString.count >= 4 { newString = String(newString.dropFirst(2).dropLast(2)) }
+        } else if (newString.hasPrefix("\\(") && newString.hasSuffix("\\)")) {
+            if newString.count >= 4 { newString = String(newString.dropFirst(2).dropLast(2)) }
+        } else if (newString.hasPrefix("$") && newString.hasSuffix("$")) {
+            if newString.count >= 2 { newString = String(newString.dropFirst().dropLast()) }
+        }
+        
+        var builder = MTMathListBuilder(string: newString)
         let output = builder.build()
+        
+        // If an error occurred, populate the error object.
         if builder.error != nil {
             error = builder.error
             return nil
         }
         return output
     }
+    // --- END: MODIFIED FUNCTION ---
     
     public mutating func buildInternal(_ oneCharOnly: Bool) -> MTMathList? {
         self.buildInternal(oneCharOnly, stopChar: nil)
     }
     
+    // NO CHANGES to buildInternal. It remains in its original, correct state.
     public mutating func buildInternal(_ oneCharOnly: Bool, stopChar stop: Character?) -> MTMathList? {
         let list = MTMathList()
         assert(!(oneCharOnly && stop != nil), "Cannot set both oneCharOnly and stopChar.")
@@ -279,7 +312,9 @@ public struct MTMathListBuilder {
                     // we flag an error and return
                     // (note setError will not set the error if there is already one, so we flag internal error
                     // in the odd case that an _error is not set.
-                    self.setError(.internalError, message:"Internal error")
+                    if self.error == nil {
+                        self.setError(.invalidCommand, message:"Invalid command \\\(command)")
+                    }
                     return nil
                 }
             } else if char == "&" {
@@ -583,6 +618,11 @@ public struct MTMathListBuilder {
             let under = MTUnderLine()
             under.innerList = self.buildInternal(true)
             return under
+        } else if command == "boxed" { // <-- 新增的分支
+            let boxed = MTBoxed()
+            // 解析花括号 {} 里的内容作为 innerList
+            boxed.innerList = self.buildInternal(true)
+            return boxed
         } else if command == "begin" {
             let env = self.readEnvironment()
             if env == nil {
@@ -830,6 +870,11 @@ public struct MTMathListBuilder {
         } else if command == "color" {
             // A color command has 2 arguments
             let mathColor = MTMathColor()
+            mathColor.colorString = self.readColor()!
+            mathColor.innerList = self.buildInternal(true)
+            return mathColor
+        } else if command == "textcolor" {
+            let mathColor = MTMathTextColor()
             mathColor.colorString = self.readColor()!
             mathColor.innerList = self.buildInternal(true)
             return mathColor

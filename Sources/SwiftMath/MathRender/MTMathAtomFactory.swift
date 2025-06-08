@@ -410,6 +410,12 @@ public class MTMathAtomFactory {
         "textstyle" : MTMathStyle(style: .text),
         "scriptstyle" : MTMathStyle(style: .script),
         "scriptscriptstyle" : MTMathStyle(style: .scriptOfScript),
+        
+        // --- START OF FIX ---
+        // 添加对 \textless 和 \textgreater 的支持，将它们映射为关系运算符 < 和 >
+        "textless": MTMathAtom(type: .relation, value: "<"),
+        "textgreater": MTMathAtom(type: .relation, value: ">"),
+        // --- END OF FIX ---
     ]
 	
 	static var supportedAccentedCharacters: [Character: (String, String)] = [
@@ -615,6 +621,39 @@ public class MTMathAtomFactory {
      */
     public static func atom(forCharacter ch: Character) -> MTMathAtom? {
         let chStr = String(ch)
+        
+        // CJK MOD: START - 优先处理 CJK 字符
+        if ch.isCJK {
+            // 如果是 CJK 字符，创建一个 .ordinary 类型的原子
+            // 这对于 \text{...} 中的中文至关重要
+            return MTMathAtom(type: .ordinary, value: chStr)
+        }
+        // CJK MOD: END
+        
+        // --- START OF NEW FIX ---
+
+        // 1. 添加对希腊字母的直接支持
+        // 这里的 isLowerGreek/isCapitalGreek 是我们之前在 Character 扩展中定义的
+        if ch.isLowerGreek || ch.isCapitalGreek {
+            // 将希腊字母视为变量（variable），这样它们会被排版成斜体
+            return MTMathAtom(type: .variable, value: chStr)
+        }
+        
+        // 2. 添加对 Unicode 上下标的支持
+        let subscriptDigits: [Character: Character] = ["₀":"0", "₁":"1", "₂":"2", "₃":"3", "₄":"4", "₅":"5", "₆":"6", "₇":"7", "₈":"8", "₉":"9"]
+        let supscriptDigits: [Character: Character] = ["⁰":"0", "¹":"1", "²":"2", "³":"3", "⁴":"4", "⁵":"5", "⁶":"6", "⁷":"7", "⁸":"8", "⁹":"9"]
+        
+        if let _ = subscriptDigits[ch] {
+            // 如果是下标数字，我们暂时也将其视为普通字符。
+            // 一个更复杂的实现会将其转换为真实的下标，但目前这样可以保证它能显示。
+            return MTMathAtom(type: .number, value: chStr)
+        }
+        if let _ = supscriptDigits[ch] {
+            return MTMathAtom(type: .number, value: chStr)
+        }
+        
+        // --- END OF NEW FIX ---
+        
         switch chStr {
             case "\u{0410}"..."\u{044F}":
 				// Cyrillic alphabet
@@ -893,13 +932,13 @@ public class MTMathAtomFactory {
                 
                 return table
             } else if env == "cases" {
-                if table.numColumns != 2 {
+                /*if table.numColumns != 2 {
                     let message = "cases environment can only have 2 columns"
                     if error == nil {
                         error = NSError(domain: MTParseError, code: MTParseErrors.invalidNumColumns.rawValue, userInfo: [NSLocalizedDescriptionKey:message])
                     }
                     return nil
-                }
+                }*/
                 
                 table.interRowAdditionalSpacing = 0
                 table.interColumnSpacing = 18

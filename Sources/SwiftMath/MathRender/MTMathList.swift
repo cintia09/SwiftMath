@@ -48,6 +48,7 @@ public enum MTMathAtomType: Int, CustomStringConvertible, Comparable {
     case overline
     /// An accented atom - Accent in TeX
     case accent
+    case boxed
     
     // Atoms after this point do not support subscripts or superscripts
     
@@ -103,6 +104,7 @@ public enum MTMathAtomType: Int, CustomStringConvertible, Comparable {
             case .underline:      return "Underline"
             case .overline:       return "Overline"
             case .accent:         return "Accent"
+            case .boxed:          return "Boxed"
             case .boundary:       return "Boundary"
             case .space:          return "Space"
             case .style:          return "Style"
@@ -233,6 +235,8 @@ public class MTMathAtom: NSObject {
                 return MTOverLine(self as? MTOverLine)
             case .accent:
                 return MTAccent(self as? MTAccent)
+            case .boxed: // <-- 新增这个 case
+                return MTBoxed(self as? MTBoxed)
             case .space:
                 return MTMathSpace(self as? MTMathSpace)
             case .color:
@@ -1018,4 +1022,29 @@ public class MTMathList : NSObject {
     }
     
     func isAtomAllowed(_ atom: MTMathAtom?) -> Bool { atom?.type != .boundary }
+}
+
+// in MTMathAtom.swift, at the end of the file
+
+// MARK: - MTBoxed
+/** An atom with a box around the contained math list. */
+public class MTBoxed: MTMathAtom {
+    public var innerList: MTMathList?
+
+    override public var finalized: MTMathAtom {
+        let newBoxed = super.finalized as! MTBoxed
+        newBoxed.innerList = newBoxed.innerList?.finalized
+        return newBoxed
+    }
+
+    init(_ boxed: MTBoxed?) {
+        super.init(boxed)
+        self.type = .boxed
+        self.innerList = MTMathList(boxed?.innerList)
+    }
+
+    override init() {
+        super.init()
+        self.type = .boxed
+    }
 }

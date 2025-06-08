@@ -24,24 +24,43 @@ public class MTFont {
     /// So we first load a CGFont from the file and then convert it to a CTFont.
     convenience init(fontWithName name: String, size:CGFloat) {
         self.init()
-        //print("Loading font \(name)")
-        let bundle = MTFont.fontBundle
-        let fontPath = bundle.path(forResource: name, ofType: "otf")
-        let fontDataProvider = CGDataProvider(filename: fontPath!)
-        self.defaultCGFont = CGFont(fontDataProvider!)!
-        //print("Num glyphs: \(self.defaultCGFont.numberOfGlyphs)")
+        // ------------------ FINAL FIX START ------------------
+                
+        // 1. 直接使用 Bundle.module，这是在 Swift Package 中查找资源的正确方式。
+        let bundle = Bundle.module
+
+        // 2. 安全地查找字体文件 .otf
+        guard let fontPath = bundle.path(forResource: name, ofType: "otf") else {
+            fatalError("MTFont Fatal Error: Font file '\(name).otf' not found in SwiftMath's bundle. Ensure it's included in the target's resources.")
+        }
+        
+        // 3. 安全地加载字体数据
+        guard let fontDataProvider = CGDataProvider(filename: fontPath),
+              let cgFont = CGFont(fontDataProvider) else {
+            fatalError("MTFont Fatal Error: Could not create font from path: \(fontPath)")
+        }
+        self.defaultCGFont = cgFont
         
         self.ctFont = CTFontCreateWithGraphicsFont(self.defaultCGFont, size, nil, nil);
         
-        //print("Loading associated .plist")
-        let mathTablePlist = bundle.url(forResource:name, withExtension:"plist")
-        self.rawMathTable = NSDictionary(contentsOf: mathTablePlist!)
-        self.mathTable = MTFontMathTable(withFont:self, mathTable:rawMathTable!)
+        // 4. 安全地查找和加载 .plist 文件
+        guard let mathTablePlistURL = bundle.url(forResource: name, withExtension: "plist"),
+              let dict = NSDictionary(contentsOf: mathTablePlistURL) else {
+            fatalError("MTFont Fatal Error: Math table plist for font '\(name)' not found or failed to load.")
+        }
+        self.rawMathTable = dict
+        
+        // 5. 直接调用 MTFontMathTable 的构造器，因为它返回非可选值。
+        //    这个构造器在失败时会抛出 Objective-C 异常，这在 Swift 中通常会导致程序终止。
+        //    所以这里的调用本身就是“要么成功，要么停机”，不需要可选绑定。
+        self.mathTable = MTFontMathTable(withFont: self, mathTable: dict)
+        
+        // ------------------- FINAL FIX END -------------------
     }
     
     static var fontBundle:Bundle {
-        // Uses bundle for class so that this can be access by the unit tests.
-        Bundle(url: Bundle.module.url(forResource: "mathFonts", withExtension: "bundle")!)!
+        // CJK MOD / BUNDLE FIX: 直接返回库的 Bundle，而不是寻找子 Bundle
+            return Bundle.module
     }
     
     /** Returns a copy of this font but with a different size. */
