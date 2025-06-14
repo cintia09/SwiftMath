@@ -169,9 +169,9 @@ public class MTMathAtomFactory {
         // We mark the following greek chars as ordinary so that we don't try
         // to automatically italicize them as we do with variables.
         // These characters fall outside the rules of italicization that we have defined.
-        "epsilon" : MTMathAtom(type: .ordinary, value: "\u{0001D716}"),
+        "epsilon": MTMathAtom(type: .ordinary, value: "\u{03F5}"),
         "vartheta" : MTMathAtom(type: .ordinary, value: "\u{0001D717}"),
-        "phi" : MTMathAtom(type: .ordinary, value: "\u{0001D719}"),
+        "phi": MTMathAtom(type: .ordinary, value: "\u{03C6}"), 
         "varrho" : MTMathAtom(type: .ordinary, value: "\u{0001D71A}"),
         "varpi" : MTMathAtom(type: .ordinary, value: "\u{0001D71B}"),
 
@@ -411,11 +411,46 @@ public class MTMathAtomFactory {
         "scriptstyle" : MTMathStyle(style: .script),
         "scriptscriptstyle" : MTMathStyle(style: .scriptOfScript),
         
-        // --- START OF FIX ---
-        // 添加对 \textless 和 \textgreater 的支持，将它们映射为关系运算符 < 和 >
-        "textless": MTMathAtom(type: .relation, value: "<"),
+        // 在 "Arrows" 部分
+        "implies": MTMathAtom(type: .relation, value: "\u{21D2}"),      // ADDED:
+        "hookleftarrow": MTMathAtom(type: .relation, value: "\u{21A9}"), // ADDED:
+        "hookrightarrow": MTMathAtom(type: .relation, value: "\u{21AA}"), // ADDED:
+        "rightharpoonup": MTMathAtom(type: .relation, value: "\u{21C0}"),// ADDED:
+        "rightharpoondown": MTMathAtom(type: .relation, value: "\u{21C1}"),// ADDED:
+        "leftharpoonup": MTMathAtom(type: .relation, value: "\u{21BC}"), // ADDED:
+        "leftharpoondown": MTMathAtom(type: .relation, value: "\u{21BD}"), // ADDED:
+        "leftrightharpoons": MTMathAtom(type: .relation, value: "\u{21CC}"),// ADDED:
+        "rightleftharpoons": MTMathAtom(type: .relation, value: "\u{21CC}"),// ADDED:
+
+        // 在 "Relations" 部分
+        "subsetneq": MTMathAtom(type: .relation, value: "\u{228A}"),   // ADDED:
+        "supsetneq": MTMathAtom(type: .relation, value: "\u{228B}"),   // ADDED:
+        "vdash": MTMathAtom(type: .relation, value: "\u{22A2}"),       // ADDED:
+        "dashv": MTMathAtom(type: .relation, value: "\u{22A3}"),       // ADDED:
+        "precsim": MTMathAtom(type: .relation, value: "\u{227C}"),    // ADDED:
+        "succsim": MTMathAtom(type: .relation, value: "\u{227D}"),    // ADDED:
+        "Join": MTMathAtom(type: .relation, value: "\u{22C8}"),        // ADDED:
+        "bowtie": MTMathAtom(type: .relation, value: "\u{22C8}"),      // ADDED:
+        "therefore": MTMathAtom(type: .relation, value: "\u{2234}"), // ADDED:
+        "because": MTMathAtom(type: .relation, value: "\u{2235}"),   // ADDED:
+
+        // 在 "Binary Operators" 部分
+        "diamond": MTMathAtom(type: .binaryOperator, value: "\u{22C4}"), // ADDED:
+
+        // 在 "Other Symbols" 部分
+        "lnot": MTMathAtom(type: .ordinary, value: "\u{00AC}"),         // ADDED:
+        "surd": MTMathAtom(type: .ordinary, value: "\u{221A}"),         // ADDED:
+        "clubsuit": MTMathAtom(type: .ordinary, value: "\u{2663}"),   // ADDED:
+        "diamondsuit": MTMathAtom(type: .ordinary, value: "\u{2662}"),// ADDED:
+        "heartsuit": MTMathAtom(type: .ordinary, value: "\u{2661}"),  // ADDED:
+        "spadesuit": MTMathAtom(type: .ordinary, value: "\u{2660}"),  // ADDED:
+        "S": MTMathAtom(type: .ordinary, value: "\u{00A7}"),             // ADDED:
+        "P": MTMathAtom(type: .ordinary, value: "\u{00B6}"),             // ADDED:
+        "not": MTMathAtom(type: .ordinary, value: "/"),                  // ADDED: for \not=
+        
+        // 在字典的末尾，`}` 之前
+        "textless": MTMathAtom(type: .relation, value: "<"),            // ADDED:
         "textgreater": MTMathAtom(type: .relation, value: ">"),
-        // --- END OF FIX ---
     ]
 	
 	static var supportedAccentedCharacters: [Character: (String, String)] = [
@@ -875,8 +910,8 @@ public class MTMathAtomFactory {
                 } else {
                     return table
                 }
-            } else if env == "eqalign" || env == "split" || env == "aligned" {
-                if table.numColumns != 2 {
+            } else if env == "eqalign" || env == "split" || env == "aligned" || env == "alignedat" {
+                if table.numColumns > 2 { // A row can have 1 or 2 columns
                     let message = "\(env) environment can only have 2 columns"
                     if error == nil {
                         error = NSError(domain: MTParseError, code: MTParseErrors.invalidNumColumns.rawValue, userInfo: [NSLocalizedDescriptionKey:message])
@@ -899,7 +934,7 @@ public class MTMathAtomFactory {
                 table.set(alignment: .left, forColumn: 1)
                 
                 return table
-            } else if env == "displaylines" || env == "gather" {
+            } else if env == "displaylines" || env == "gather" || env == "gathered" {
                 if table.numColumns != 1 {
                     let message = "\(env) environment can only have 1 column"
                     if error == nil {

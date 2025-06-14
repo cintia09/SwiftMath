@@ -12,14 +12,13 @@ import CoreText
 // Extensions.swift (或任何其他 Swift 文件)
 extension Character {
     var isCJK: Bool {
-        // CJK Unified Ideographs range: 4E00–9FFF
-        if "\u{4E00}" <= self && self <= "\u{9FFF}" { return true }
-        // ... (其他 CJK 范围，可以根据需要添加) ...
-        // Full-width punctuation, etc.: FF00–FFEF
-        if "\u{FF00}" <= self && self <= "\u{FFEF}" { return true }
-        return false
+        return ("\u{4E00}"..."\u{9FFF}").contains(self) || ("\u{3000}"..."\u{303F}").contains(self) ||
+               ("\u{3040}"..."\u{309F}").contains(self) || ("\u{30A0}"..."\u{30FF}").contains(self) ||
+               ("\u{FF00}"..."\u{FFEF}").contains(self) || ("\u{3400}"..."\u{4DBF}").contains(self) ||
+               ("\u{F900}"..."\u{FAFF}").contains(self)
     }
 }
+
 
 // MARK: - Inter Element Spacing
 

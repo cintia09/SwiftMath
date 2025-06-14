@@ -306,6 +306,7 @@ public struct MTMathListBuilder {
                     }
                     continue
                 }
+                
                 atom = self.atomForCommand(command)
                 if atom == nil {
                     // this was an unknown command,
@@ -363,6 +364,25 @@ public struct MTMathListBuilder {
         return list
     }
     
+    // 在 MTMathListBuilder 结构体的大括号内添加这个新方法
+    private mutating func readUntilMatchingBrace() -> String {
+        var content = ""
+        var braceLevel = 1
+        while self.hasCharacters {
+            let char = self.getNextCharacter()
+            if char == "{" {
+                braceLevel += 1
+                content.append(char)
+            } else if char == "}" {
+                braceLevel -= 1
+                if braceLevel == 0 { break } // 找到了匹配的右括号
+                content.append(char)
+            } else {
+                content.append(char)
+            }
+        }
+        return content
+    }
     
     // MARK: - MTMathList to LaTeX conversion
     
@@ -551,6 +571,26 @@ public struct MTMathListBuilder {
     }
     
     mutating func atomForCommand(_ command:String) -> MTMathAtom? {
+        if command == "text" {
+            // `buildInternal` 已经为我们设置好了正确的字体样式和空格许可状态。
+            // 我们现在只需要构建一个原子来包含 `\text{...}` 花括号里的内容。
+            let textContentList = self.buildInternal(true)
+            
+            // `textContentList` 可能包含多个原子（例如 "H_2O"），
+            // 我们需要将它们融合成一个单一的 .ordinary 原子。
+            if let firstAtom = textContentList?.atoms.first, let list = textContentList {
+                // 从第二个原子开始，将所有原子融合到第一个原子中
+                for i in 1..<list.atoms.count {
+                    firstAtom.fuse(with: list.atoms[i])
+                }
+                // 返回这个融合后的、单一的原子
+                return firstAtom
+            }
+            
+            // 如果花括号内为空，则返回一个空的普通原子
+            return MTMathAtom(type: .ordinary, value: "")
+        }
+        
         if let atom = MTMathAtomFactory.atom(forLatexSymbol: command) {
             return atom
         }
@@ -913,52 +953,74 @@ public struct MTMathListBuilder {
     }
     
     mutating func buildTable(env: String?, firstList: MTMathList?, isRow: Bool) -> MTMathAtom? {
-        // Save the current env till an new one gets built.
+        // 保存当前环境，以便在构建完成后恢复
         let oldEnv = self.currentEnv
-        
-        currentEnv = MTEnvProperties(name: env)
-        
-        var currentRow = 0
-        var currentCol = 0
+        self.currentEnv = MTEnvProperties(name: env)
         
         var rows = [[MTMathList]]()
-        rows.append([MTMathList]())
-        if firstList != nil {
-            rows[currentRow].append(firstList!)
-            if isRow {
-                currentEnv!.numRows+=1
-                currentRow+=1
-                rows.append([MTMathList]())
-            } else {
-                currentCol+=1
-            }
-        }
-        while !currentEnv!.ended && self.hasCharacters {
-            let list = self.buildInternal(false)
-            if list == nil {
-                // If there is an error building the list, bail out early.
-                return nil
-            }
-            rows[currentRow].append(list!)
-            currentCol+=1
-            if currentEnv!.numRows > currentRow {
-                currentRow = currentEnv!.numRows
-                rows.append([MTMathList]())
-                currentCol = 0
+        var currentRow = [MTMathList]()
+        
+        if let firstList = firstList {
+            currentRow.append(firstList)
+            if isRow { // 如果是由'\\'或'&'触发的，这行就结束了
+                rows.append(currentRow)
+                currentRow = []
             }
         }
         
-        if !currentEnv!.ended && currentEnv!.envName != nil {
-            self.setError(.missingEnd, message: "Missing \\end")
-            return nil
+        // 主循环：持续构建单元格，直到环境结束或没有更多字符
+        while !self.currentEnv!.ended && self.hasCharacters {
+            
+            // 在构建每个单元格之前，跳过不必要的空格
+            self.skipSpaces()
+            
+            // 检查是否以 '&' 开头，代表空列
+            if self.hasCharacters && self.string[self.currentCharIndex] == "&" {
+                currentRow.append(MTMathList())
+                _ = self.getNextCharacter() // 消费掉 '&'
+                continue // 继续解析该行的下一列
+            }
+
+            // 递归调用 buildInternal 来解析一个单元格的内容。
+            // buildInternal 会在遇到 '&', '\\', 或 '\end' 时停止并返回。
+            let cellList = self.buildInternal(false)
+            if error != nil { return nil }
+            
+            currentRow.append(cellList ?? MTMathList())
+            
+            // 检查是什么导致了 buildInternal 的返回
+            if self.hasCharacters {
+                let char = self.string[self.currentCharIndex]
+                if char == "&" {
+                    // 是列分隔符，消费掉它，然后循环继续构建下一列
+                    _ = self.getNextCharacter()
+                }
+                // 如果是'\'或'}'，buildInternal 的主循环会处理，我们在这里不需要做任何事
+                // 但 `stopCommand` 会处理 `\\` 或 `\cr` 并返回，我们需要在这里处理换行
+            }
+            
+            // 检查是否需要换行。
+            // `stopCommand` 会在遇到 \\ 时返回，此时我们需要处理换行。
+            // 我们通过检查 currentEnv.numRows 的变化来判断。
+            if self.currentEnv?.numRows ?? 0 > rows.count {
+                 rows.append(currentRow)
+                 currentRow = []
+            }
         }
         
-        var error:NSError? = self.error
-        let table = MTMathAtomFactory.table(withEnvironment: currentEnv?.envName, rows: rows, error: &error)
-        if table == nil && self.error == nil {
-            self.error = error
-            return nil
+        // 将最后一行（如果非空）添加到总行列表中
+        if !currentRow.isEmpty {
+            rows.append(currentRow)
         }
+        
+        if !self.currentEnv!.ended && self.currentEnv!.envName != nil {
+            setError(.missingEnd, message: "Missing \\end for environment \(self.currentEnv!.envName!)")
+        }
+        
+        var buildError: NSError? = self.error
+        let table = MTMathAtomFactory.table(withEnvironment: self.currentEnv?.envName, rows: rows, error: &buildError)
+        if table == nil && self.error == nil { self.error = buildError }
+        
         self.currentEnv = oldEnv
         return table
     }

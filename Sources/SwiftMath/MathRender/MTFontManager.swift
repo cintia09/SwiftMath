@@ -27,10 +27,6 @@ public class MTFontManager {
     var nameToFontMap = [String: MTFont]()
 
     public func font(withName name:String, size:CGFloat) -> MTFont? {
-        // --- START OF FIX ---
-        
-        // 1. 检查缓存（这部分逻辑保持不变）
-        // 注意：由于 MTFontV2 已经实现了 copy(withSize:)，我们可以继续使用这个缓存机制。
         if let cachedFont = self.nameToFontMap[name] {
             if cachedFont.fontSize == size {
                 return cachedFont
@@ -39,38 +35,15 @@ public class MTFontManager {
             }
         }
         
-        // 2. 如果缓存未命中，使用新的、健壮的字体系统来创建字体。
-        //    首先，将字体名称转换为 MathFont 枚举类型。
         guard let mathFont = MathFont(rawValue: name) else {
-            // 如果传入的 name 不是一个已知的数学字体（比如 PingFangSC），
-            // 我们就不应该尝试用这个管理器加载它。返回 nil 是安全的。
             print("MTFontManager Error: '\(name)' is not a recognized MathFont in the library.")
             return nil
         }
         
-        // 3. 使用 MathFont 枚举的便捷方法来创建 MTFontV2 实例。
-        //    这个方法会通过 BundleManager 安全地加载字体。
         let newFont = mathFont.mtfont(size: size)
-        
-        // 4. 将新创建的字体存入缓存。
         self.nameToFontMap[name] = newFont
         
         return newFont
-        
-        // --- END OF FIX ---
-        
-        /*
-         // ----> 以下是旧的、导致崩溃的代码，我们不再使用它 <----
-         var f = self.nameToFontMap[name]
-         if f == nil {
-         // 这行代码调用了 MTFont.swift 中有问题的 init
-         f = MTFont(fontWithName: name, size: size)
-         self.nameToFontMap[name] = f
-         }
-         
-         if f!.fontSize == size { return f }
-         else { return f!.copy(withSize: size) }
-         */
     }
     
     public func latinModernFont(withSize size:CGFloat) -> MTFont? {
