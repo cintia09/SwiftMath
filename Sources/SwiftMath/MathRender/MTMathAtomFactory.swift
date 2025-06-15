@@ -12,6 +12,7 @@ import Foundation
 public class MTMathAtomFactory {
     
     public static let aliases = [
+        "dots" : "ldots",
         "lnot" : "neg",
         "land" : "wedge",
         "lor" : "vee",
@@ -337,6 +338,10 @@ public class MTMathAtomFactory {
         "bigotimes" : MTMathAtomFactory.operatorWithName( "\u{2A02}", limits: true),
         "biguplus" : MTMathAtomFactory.operatorWithName( "\u{2A04}", limits: true),
         "bigsqcup" : MTMathAtomFactory.operatorWithName( "\u{2A06}", limits: true),
+        "iint" : MTMathAtomFactory.operatorWithName( "\u{222C}", limits: false), // 二重积分
+        "iiint" : MTMathAtomFactory.operatorWithName( "\u{222D}", limits: false), // 三重积分
+        "oiint": MTMathAtomFactory.operatorWithName("\u{222F}", limits: false),  // 二重曲面积分 ∯
+        "oiiint": MTMathAtomFactory.operatorWithName("\u{2230}", limits: false), // 三重体积分 ∰
 
         // Latex command characters
         "{" : MTMathAtom(type: .open, value: "{"),
@@ -922,7 +927,7 @@ public class MTMathAtomFactory {
                 let spacer = MTMathAtom(type: .ordinary, value: "")
                 
                 for i in 0..<table.cells.count {
-                    if table.cells[i].count >= 1 {
+                    if table.cells[i].count >= 2 {
                         table.cells[i][1].insert(spacer, at: 0)
                     }
                 }
