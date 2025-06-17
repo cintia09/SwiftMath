@@ -1077,9 +1077,11 @@ public struct MTMathListBuilder {
         var output = ""
         while self.hasCharacters {
             let char = self.getNextCharacter()
-            if char.isLowercase || char.isUppercase {
+            // 修正：允许字母和星号 * 作为环境名称的一部分
+            if char.isLowercase || char.isUppercase || char == "*" {
                 output.append(char)
             } else {
+                // 遇到其他字符，则退回并停止读取
                 self.unlookCharacter()
                 break
             }

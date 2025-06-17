@@ -915,7 +915,7 @@ public class MTMathAtomFactory {
                 } else {
                     return table
                 }
-            } else if env == "eqalign" || env == "split" || env == "aligned" || env == "alignedat" {
+            } else if env == "eqalign" || env == "split" || env == "aligned" || env == "alignedat" || env == "align" || env == "align*" {
                 if table.numColumns > 2 { // A row can have 1 or 2 columns
                     let message = "\(env) environment can only have 2 columns"
                     if error == nil {
