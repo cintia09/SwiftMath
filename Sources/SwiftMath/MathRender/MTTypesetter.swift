@@ -11,11 +11,15 @@ import CoreText
 
 // Extensions.swift (或任何其他 Swift 文件)
 extension Character {
-    var isCJK: Bool {
+    public var isCJK: Bool {
         return ("\u{4E00}"..."\u{9FFF}").contains(self) || ("\u{3000}"..."\u{303F}").contains(self) ||
                ("\u{3040}"..."\u{309F}").contains(self) || ("\u{30A0}"..."\u{30FF}").contains(self) ||
                ("\u{FF00}"..."\u{FFEF}").contains(self) || ("\u{3400}"..."\u{4DBF}").contains(self) ||
                ("\u{F900}"..."\u{FAFF}").contains(self)
+    }
+    
+    var isControl: Bool {
+        return self.unicodeScalars.first?.properties.generalCategory == .control
     }
 }
 

@@ -220,6 +220,19 @@ public struct MTMathListBuilder {
             var atom: MTMathAtom? = nil
             let char = self.getNextCharacter()
             
+            if char == "'" {
+                if (prevAtom == nil || prevAtom!.superScript != nil || !prevAtom!.isScriptAllowed()) {
+                    prevAtom = MTMathAtom(type: .ordinary, value: "")
+                    list.add(prevAtom!)
+                }
+                
+                let primeAtom = MTMathAtomFactory.atom(forLatexSymbol: "prime")!
+                let primeList = MTMathList()
+                primeList.add(primeAtom)
+                prevAtom!.superScript = primeList
+                continue
+            }
+            
             if oneCharOnly {
                 if char == "^" || char == "}" || char == "_" || char == "&" {
                     // this is not the character we are looking for.
@@ -364,7 +377,6 @@ public struct MTMathListBuilder {
         return list
     }
     
-    // 在 MTMathListBuilder 结构体的大括号内添加这个新方法
     private mutating func readUntilMatchingBrace() -> String {
         var content = ""
         var braceLevel = 1
@@ -375,7 +387,7 @@ public struct MTMathListBuilder {
                 content.append(char)
             } else if char == "}" {
                 braceLevel -= 1
-                if braceLevel == 0 { break } // 找到了匹配的右括号
+                if braceLevel == 0 { break }
                 content.append(char)
             } else {
                 content.append(char)
@@ -572,22 +584,15 @@ public struct MTMathListBuilder {
     
     mutating func atomForCommand(_ command:String) -> MTMathAtom? {
         if command == "text" {
-            // `buildInternal` 已经为我们设置好了正确的字体样式和空格许可状态。
-            // 我们现在只需要构建一个原子来包含 `\text{...}` 花括号里的内容。
             let textContentList = self.buildInternal(true)
             
-            // `textContentList` 可能包含多个原子（例如 "H_2O"），
-            // 我们需要将它们融合成一个单一的 .ordinary 原子。
             if let firstAtom = textContentList?.atoms.first, let list = textContentList {
-                // 从第二个原子开始，将所有原子融合到第一个原子中
                 for i in 1..<list.atoms.count {
                     firstAtom.fuse(with: list.atoms[i])
                 }
-                // 返回这个融合后的、单一的原子
                 return firstAtom
             }
             
-            // 如果花括号内为空，则返回一个空的普通原子
             return MTMathAtom(type: .ordinary, value: "")
         }
         
@@ -658,9 +663,8 @@ public struct MTMathListBuilder {
             let under = MTUnderLine()
             under.innerList = self.buildInternal(true)
             return under
-        } else if command == "boxed" { // <-- 新增的分支
+        } else if command == "boxed" {
             let boxed = MTBoxed()
-            // 解析花括号 {} 里的内容作为 innerList
             boxed.innerList = self.buildInternal(true)
             return boxed
         } else if command == "begin" {
@@ -688,6 +692,29 @@ public struct MTMathListBuilder {
             mathColorbox.colorString = self.readColor()!
             mathColorbox.innerList = self.buildInternal(true)
             return mathColorbox
+        } else if command == "operatorname" {
+            guard let contentList = self.buildInternal(true) else {
+                return MTMathAtomFactory.operatorWithName("", limits: true)
+            }
+            
+            let operatorName = MTMathListBuilder.mathListToString(contentList)
+            let operatorAtom = MTMathAtomFactory.operatorWithName(operatorName, limits: true)
+            return operatorAtom
+        } else if command == "pmod" {
+            let list = MTMathList()
+            // 添加一个空格 (mod 前)
+            list.add(MTMathSpace(space: 4)) // 类似 \> 的间距
+            list.add(MTMathAtomFactory.operatorWithName("mod", limits: false))
+            // 添加一个空格 (mod 后)
+            list.add(MTMathAtom(type: .ordinary, value: " "))
+            // 递归解析花括号里的内容
+            if let innerList = self.buildInternal(true) {
+                list.append(innerList)
+            }
+            // 将整个列表包装在一个 Inner 原子中，使其表现为一个整体
+            let inner = MTInner()
+            inner.innerList = list
+            return inner
         } else {
             let errorMessage = "Invalid command \\\(command)"
             self.setError(.invalidCommand, message:errorMessage)
@@ -953,7 +980,6 @@ public struct MTMathListBuilder {
     }
     
     mutating func buildTable(env: String?, firstList: MTMathList?, isRow: Bool) -> MTMathAtom? {
-        // 保存当前环境，以便在构建完成后恢复
         let oldEnv = self.currentEnv
         self.currentEnv = MTEnvProperties(name: env)
         
@@ -962,27 +988,22 @@ public struct MTMathListBuilder {
         
         if let firstList = firstList {
             currentRow.append(firstList)
-            if isRow { // 如果是由'\\'或'&'触发的，这行就结束了
+            if isRow {
                 rows.append(currentRow)
                 currentRow = []
             }
         }
         
-        // 主循环：持续构建单元格，直到环境结束或没有更多字符
         while !self.currentEnv!.ended && self.hasCharacters {
             
-            // 在构建每个单元格之前，跳过不必要的空格
             self.skipSpaces()
             
-            // 检查是否以 '&' 开头，代表空列
             if self.hasCharacters && self.string[self.currentCharIndex] == "&" {
                 currentRow.append(MTMathList())
-                _ = self.getNextCharacter() // 消费掉 '&'
-                continue // 继续解析该行的下一列
+                _ = self.getNextCharacter()
+                continue
             }
 
-            // 递归调用 buildInternal 来解析一个单元格的内容。
-            // buildInternal 会在遇到 '&', '\\', 或 '\end' 时停止并返回。
             let cellList = self.buildInternal(false)
             if error != nil { return nil }
             
@@ -992,23 +1013,16 @@ public struct MTMathListBuilder {
             if self.hasCharacters {
                 let char = self.string[self.currentCharIndex]
                 if char == "&" {
-                    // 是列分隔符，消费掉它，然后循环继续构建下一列
                     _ = self.getNextCharacter()
                 }
-                // 如果是'\'或'}'，buildInternal 的主循环会处理，我们在这里不需要做任何事
-                // 但 `stopCommand` 会处理 `\\` 或 `\cr` 并返回，我们需要在这里处理换行
             }
             
-            // 检查是否需要换行。
-            // `stopCommand` 会在遇到 \\ 时返回，此时我们需要处理换行。
-            // 我们通过检查 currentEnv.numRows 的变化来判断。
             if self.currentEnv?.numRows ?? 0 > rows.count {
                  rows.append(currentRow)
                  currentRow = []
             }
         }
         
-        // 将最后一行（如果非空）添加到总行列表中
         if !currentRow.isEmpty {
             rows.append(currentRow)
         }
@@ -1077,11 +1091,9 @@ public struct MTMathListBuilder {
         var output = ""
         while self.hasCharacters {
             let char = self.getNextCharacter()
-            // 修正：允许字母和星号 * 作为环境名称的一部分
             if char.isLowercase || char.isUppercase || char == "*" {
                 output.append(char)
             } else {
-                // 遇到其他字符，则退回并停止读取
                 self.unlookCharacter()
                 break
             }
